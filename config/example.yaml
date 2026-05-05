@@ -1,0 +1,90 @@
+# SecureOps configuration reference
+# Copy this file to config/config.yaml and fill in your values.
+# Never commit config.yaml — it contains credentials.
+
+# ─── Organization ──────────────────────────────────────────────────────────────
+organization:
+  name: "your-org"
+  environment: "production"        # production | staging | dev
+
+# ─── Cloud providers ───────────────────────────────────────────────────────────
+# Enable the cloud providers you use. SecureOps will only attempt to pull
+# logs from enabled providers.
+cloud:
+  aws:
+    enabled: false
+    region: "us-east-1"
+    account_id: ""                 # your AWS account ID
+    # Credentials are read from the environment (AWS_ACCESS_KEY_ID, etc.)
+    # or from an IAM role if running on EC2/ECS.
+
+  gcp:
+    enabled: false
+    project_id: ""                 # your GCP project ID
+    # Credentials are read from GOOGLE_APPLICATION_CREDENTIALS.
+
+  azure:
+    enabled: false
+    subscription_id: ""            # your Azure subscription ID
+    tenant_id: ""
+    # Credentials are read from AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID.
+
+# ─── Integrations ──────────────────────────────────────────────────────────────
+
+integrations:
+  wazuh:
+    enabled: false
+    url: "https://wazuh.example.com"
+    port: 55000
+    username: ""                   # Wazuh API username
+    password: ""                   # Wazuh API password — use an env var in production
+    # Minimum severity to forward to Wazuh.
+    # Events below this level are recorded in evidence/ but not sent.
+    min_severity: "medium"         # critical | high | medium | low | info
+
+  defectdojo:
+    enabled: false
+    url: "https://defectdojo.example.com"
+    api_token: ""                  # DefectDojo API token — use an env var in production
+    # SecureOps will create a finding in this product for each vulnerability event.
+    default_product_name: "your-product"
+    # Auto-close findings in DefectDojo when the same CVE is no longer present.
+    auto_close_resolved: true
+
+  slack:
+    enabled: false
+    webhook_url: ""                # Slack incoming webhook URL
+    channel: "#security-alerts"
+    # Only send Slack alerts for events at or above this severity.
+    min_severity: "high"           # critical | high | medium | low | info
+    # Mention a user or group for critical findings.
+    mention_on_critical: "@security-team"
+
+  email:
+    enabled: false
+    smtp_host: "smtp.example.com"
+    smtp_port: 587
+    smtp_username: ""
+    smtp_password: ""              # use an env var in production
+    from_address: "secureops@example.com"
+    to_addresses:
+      - "security@example.com"
+    min_severity: "critical"       # critical | high | medium | low | info
+
+# ─── Evidence ──────────────────────────────────────────────────────────────────
+evidence:
+  output_dir: "evidence/"
+  # Retain evidence files for this many days before archiving.
+  retention_days: 90
+  # Compliance frameworks to include in evidence reports.
+  frameworks:
+    - "SOC2"
+    - "ISO27001"
+
+# ─── Normalizer ────────────────────────────────────────────────────────────────
+normalizer:
+  # Drop events below this severity before they reach any integration.
+  drop_below_severity: "info"
+  # Deduplicate events with the same source tool + affected_file + title
+  # within this window (seconds).
+  dedup_window_seconds: 3600

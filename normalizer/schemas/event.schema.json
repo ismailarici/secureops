@@ -1,0 +1,179 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://secureops/schemas/event.schema.json",
+  "title": "SecurityEvent",
+  "description": "Canonical SecureOps security event. All inputs are normalised to this schema before routing.",
+  "type": "object",
+  "required": [
+    "event_id",
+    "timestamp",
+    "ingested_at",
+    "schema_version",
+    "source",
+    "event_type",
+    "severity",
+    "title",
+    "payload"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Globally unique identifier for this event."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the event occurred (UTC, ISO 8601)."
+    },
+    "ingested_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When SecureOps received and normalised this event (UTC, ISO 8601)."
+    },
+    "schema_version": {
+      "type": "string",
+      "description": "Schema version. Currently 1.0.",
+      "const": "1.0"
+    },
+    "source": {
+      "type": "object",
+      "description": "Origin of the event.",
+      "required": ["component", "tool"],
+      "additionalProperties": false,
+      "properties": {
+        "component": {
+          "type": "string",
+          "enum": ["securepipe", "secureinfra", "cloud", "identity", "system"],
+          "description": "High-level component that produced this event."
+        },
+        "tool": {
+          "type": "string",
+          "description": "Specific tool that produced the finding (e.g. semgrep, trivy, cloudtrail)."
+        },
+        "environment": {
+          "type": ["string", "null"],
+          "description": "Environment label from config (e.g. production, staging)."
+        },
+        "cloud_provider": {
+          "type": ["string", "null"],
+          "enum": ["aws", "gcp", "azure", "on-prem", null],
+          "description": "Cloud provider, if applicable."
+        },
+        "region": {
+          "type": ["string", "null"],
+          "description": "Cloud region, if applicable."
+        },
+        "account_id": {
+          "type": ["string", "null"],
+          "description": "Cloud account or project ID, if applicable."
+        }
+      }
+    },
+    "event_type": {
+      "type": "string",
+      "enum": ["vulnerability", "cloud_event", "identity_event", "system_event"],
+      "description": "Top-level category of the event."
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["critical", "high", "medium", "low", "info"],
+      "description": "Normalised severity level."
+    },
+    "title": {
+      "type": "string",
+      "description": "Short human-readable summary of the event."
+    },
+    "description": {
+      "type": ["string", "null"],
+      "description": "Full detail about the event."
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Free-form labels for filtering and grouping."
+    },
+    "payload": {
+      "type": "object",
+      "description": "Event-type-specific fields. Shape varies by event_type.",
+      "oneOf": [
+        { "$ref": "#/$defs/VulnerabilityPayload" },
+        { "$ref": "#/$defs/CloudEventPayload" },
+        { "$ref": "#/$defs/IdentityEventPayload" },
+        { "$ref": "#/$defs/SystemEventPayload" }
+      ]
+    },
+    "raw": {
+      "type": ["object", "null"],
+      "description": "Original unmodified input, preserved for audit purposes."
+    }
+  },
+  "$defs": {
+    "VulnerabilityPayload": {
+      "type": "object",
+      "description": "Payload for vulnerability findings (SAST, SCA, container scan, host scan).",
+      "additionalProperties": true,
+      "properties": {
+        "cve_id": { "type": ["string", "null"] },
+        "cwe_id": { "type": ["string", "null"] },
+        "affected_file": { "type": ["string", "null"] },
+        "affected_line": { "type": ["integer", "null"] },
+        "affected_package": { "type": ["string", "null"] },
+        "affected_version": { "type": ["string", "null"] },
+        "fixed_version": { "type": ["string", "null"] },
+        "remediation": { "type": ["string", "null"] },
+        "references": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "CloudEventPayload": {
+      "type": "object",
+      "description": "Payload for cloud provider audit log events.",
+      "additionalProperties": true,
+      "properties": {
+        "action": { "type": ["string", "null"] },
+        "actor": { "type": ["string", "null"] },
+        "resource": { "type": ["string", "null"] },
+        "source_ip": { "type": ["string", "null"] },
+        "user_agent": { "type": ["string", "null"] },
+        "outcome": {
+          "type": ["string", "null"],
+          "enum": ["success", "failure", null]
+        }
+      }
+    },
+    "IdentityEventPayload": {
+      "type": "object",
+      "description": "Payload for identity provider events (Okta, Azure AD, AWS IAM).",
+      "additionalProperties": true,
+      "properties": {
+        "action": { "type": ["string", "null"] },
+        "actor": { "type": ["string", "null"] },
+        "target": { "type": ["string", "null"] },
+        "outcome": {
+          "type": ["string", "null"],
+          "enum": ["success", "failure", null]
+        },
+        "source_ip": { "type": ["string", "null"] },
+        "mfa_used": { "type": ["boolean", "null"] }
+      }
+    },
+    "SystemEventPayload": {
+      "type": "object",
+      "description": "Payload for host and OS-level events.",
+      "additionalProperties": true,
+      "properties": {
+        "hostname": { "type": ["string", "null"] },
+        "process": { "type": ["string", "null"] },
+        "action": { "type": ["string", "null"] },
+        "target_path": { "type": ["string", "null"] },
+        "destination_ip": { "type": ["string", "null"] },
+        "destination_port": { "type": ["integer", "null"] },
+        "rule_id": { "type": ["string", "null"] }
+      }
+    }
+  }
+}
