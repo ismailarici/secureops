@@ -1,3 +1,10 @@
+# Core — always required
 requests>=2.31.0
 pyyaml>=6.0.1
 jsonschema>=4.21.0
+
+# Cloud ingestors — install only what you use
+# boto3>=1.34.0                       # AWS CloudTrail + IAM:  pip install boto3
+# google-cloud-logging>=3.9.0         # GCP Audit Logs:        pip install google-cloud-logging
+# azure-mgmt-monitor>=6.0.0           # Azure Monitor:         pip install azure-mgmt-monitor azure-identity
+# azure-identity>=1.15.0              # Azure authentication:  (included above)
