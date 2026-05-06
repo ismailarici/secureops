@@ -27,6 +27,16 @@ _TEST_TITLE = "SecureOps"
 _TEST_TYPE_NAME = "Manual Code Review"  # nearest built-in type for custom findings
 
 
+_SEVERITY_MAP = {
+    "critical": "S0",
+    "high": "S1",
+    "medium": "S2",
+    "low": "S3",
+    "info": "S4",
+    "informational": "S4",
+}
+
+
 class DefectDojoClient:
     def __init__(self, config: dict) -> None:
         self._base = config.get("url", "").rstrip("/")
@@ -40,6 +50,7 @@ class DefectDojoClient:
         self._product_id: int | None = None
         self._engagement_id: int | None = None
         self._test_id: int | None = None
+        self._test_type_id: int | None = None
 
     # ── API helpers ──────────────────────────────────────────────────────────
 
@@ -55,14 +66,24 @@ class DefectDojoClient:
 
     # ── Setup ────────────────────────────────────────────────────────────────
 
+    def _get_or_create_product_type(self) -> int:
+        type_name = "SecureOps"
+        results = self._get("/api/v2/product_types/", {"name": type_name}).get("results", [])
+        if results:
+            return results[0]["id"]
+        data = self._post("/api/v2/product_types/", {"name": type_name})
+        log.info("DefectDojo: created product type '%s' (id=%s)", type_name, data["id"])
+        return data["id"]
+
     def _get_or_create_product(self) -> int:
         results = self._get("/api/v2/products/", {"name": self._product_name}).get("results", [])
         if results:
             return results[0]["id"]
+        prod_type_id = self._get_or_create_product_type()
         data = self._post("/api/v2/products/", {
             "name": self._product_name,
-            "description": f"Managed by SecureOps",
-            "prod_type": 1,
+            "description": "Managed by SecureOps",
+            "prod_type": prod_type_id,
         })
         log.info("DefectDojo: created product '%s' (id=%s)", self._product_name, data["id"])
         return data["id"]
@@ -93,15 +114,15 @@ class DefectDojoClient:
             "title": _TEST_TITLE,
         }).get("results", [])
         if results:
+            self._test_type_id = results[0]["test_type"]
             return results[0]["id"]
-        # Look up the test type id
         type_results = self._get("/api/v2/test_types/", {"name": _TEST_TYPE_NAME}).get("results", [])
-        test_type_id = type_results[0]["id"] if type_results else 1
+        self._test_type_id = type_results[0]["id"] if type_results else 1
         from datetime import date
         data = self._post("/api/v2/tests/", {
             "engagement": engagement_id,
             "title": _TEST_TITLE,
-            "test_type": test_type_id,
+            "test_type": self._test_type_id,
             "target_start": f"{date.today()}T00:00:00Z",
             "target_end": f"{date.today()}T23:59:59Z",
         })
@@ -134,10 +155,13 @@ class DefectDojoClient:
 
     def _build_finding(self, event: dict) -> dict:
         payload = event.get("payload", {})
+        sev = event.get("severity", "info").lower()
         return {
             "test": self._test_id,
+            "found_by": [self._test_type_id],
             "title": event.get("title", "")[:500],
-            "severity": event.get("severity", "info").capitalize(),
+            "severity": sev.capitalize(),
+            "numerical_severity": _SEVERITY_MAP.get(sev, "S4"),
             "description": event.get("description") or event.get("title", ""),
             "mitigation": payload.get("remediation") or "See finding description.",
             "references": "\n".join(payload.get("references") or []),
@@ -146,7 +170,7 @@ class DefectDojoClient:
             "component_name": payload.get("affected_package") or "",
             "component_version": payload.get("affected_version") or "",
             "cve": payload.get("cve_id") or "",
-            "cwe": int(payload.get("cwe_id", "CWE-0").replace("CWE-", "") or 0) or None,
+            "cwe": int((payload.get("cwe_id") or "CWE-0").replace("CWE-", "") or 0) or None,
             "active": True,
             "verified": False,
             "false_p": False,
