@@ -96,13 +96,8 @@
     },
     "payload": {
       "type": "object",
-      "description": "Event-type-specific fields. Shape varies by event_type.",
-      "oneOf": [
-        { "$ref": "#/$defs/VulnerabilityPayload" },
-        { "$ref": "#/$defs/CloudEventPayload" },
-        { "$ref": "#/$defs/IdentityEventPayload" },
-        { "$ref": "#/$defs/SystemEventPayload" }
-      ]
+      "description": "Event-type-specific fields. Shape varies by event_type. See docs/event-schema.md for per-type field definitions.",
+      "additionalProperties": true
     },
     "raw": {
       "type": ["object", "null"],

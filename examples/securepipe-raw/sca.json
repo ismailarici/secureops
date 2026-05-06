@@ -1,0 +1,31 @@
+{
+  "dependencies": [
+    {
+      "name": "PyYAML",
+      "version": "5.3.1",
+      "vulns": [
+        {
+          "id": "CVE-2020-14343",
+          "fix_versions": ["5.4"],
+          "description": "A vulnerability was discovered in the PyYAML library in versions before 5.4, where it is susceptible to arbitrary code execution when it processes untrusted YAML files through the full_load method or with the FullLoader."
+        }
+      ]
+    },
+    {
+      "name": "Flask",
+      "version": "0.12.2",
+      "vulns": [
+        {
+          "id": "CVE-2018-1000656",
+          "fix_versions": ["0.12.3"],
+          "description": "The Pallets Project Flask before 0.12.3 is affected by: unexpected memory usage. The impact is: denial of service. The attack vector is: crafted encoded JSON data."
+        }
+      ]
+    },
+    {
+      "name": "requests",
+      "version": "2.27.0",
+      "vulns": []
+    }
+  ]
+}

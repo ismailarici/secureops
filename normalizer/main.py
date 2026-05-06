@@ -2,22 +2,25 @@
 Entry point for the SecureOps normaliser.
 
 Usage:
-    python -m normalizer.main --input <path-to-tool-output.json> [--source <tool-name>]
+    # Consume a full SecurePipe raw/ directory:
+    python -m normalizer.main --input /path/to/reports/raw
 
-The normaliser:
-1. Reads raw tool output from --input
-2. Detects or accepts the source tool via --source
-3. Runs the appropriate normaliser to produce SecurityEvent objects
-4. Validates each event against the JSON schema
-5. Routes each event to enabled integrations
-6. Writes each event to evidence/
+    # Consume a single JSON file (source tool must be specified):
+    python -m normalizer.main --input semgrep.json --source semgrep
+
+    # Use a non-default config:
+    python -m normalizer.main --input /path/to/raw --config /path/to/config.yaml
 """
 
 import argparse
-import json
 import logging
 import sys
 from pathlib import Path
+
+from normalizer import config as cfg
+from normalizer import evidence, validator
+from normalizer.router import route
+from normalizer.sources.securepipe import loader as securepipe_loader
 
 logging.basicConfig(
     level=logging.INFO,
@@ -26,83 +29,113 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-
-def load_config(config_path: str) -> dict:
-    # TODO (Phase 2): parse config/config.yaml and return a validated config dict
-    log.info("Loading config from %s", config_path)
-    return {}
+_SINGLE_FILE_SOURCES = {"semgrep", "sca", "trivy", "zap"}
 
 
-def load_raw_input(input_path: str) -> dict:
-    path = Path(input_path)
-    if not path.exists():
-        log.error("Input file not found: %s", input_path)
+def _load_single_file(input_path: Path, source: str, source_meta: dict) -> list[dict]:
+    from normalizer.sources.securepipe import semgrep, sca, trivy, zap
+    parsers = {
+        "semgrep": semgrep.normalise,
+        "sca": sca.normalise,
+        "trivy": trivy.normalise,
+        "zap": zap.normalise,
+    }
+    if source not in parsers:
+        log.error(
+            "Unknown source '%s'. Supported values: %s",
+            source,
+            ", ".join(parsers),
+        )
         sys.exit(1)
-    with path.open() as f:
-        return json.load(f)
-
-
-def detect_source(raw: dict) -> str:
-    # TODO (Phase 2): inspect raw output structure to auto-detect which tool produced it
-    # e.g. check for semgrep's "results" key, trivy's "Results" key, etc.
-    raise NotImplementedError("Auto-detection not yet implemented. Pass --source explicitly.")
-
-
-def normalise(raw: dict, source: str) -> list[dict]:
-    # TODO (Phase 2): route to the correct per-source normaliser
-    # e.g. from normalizer.sources.securepipe import semgrep, trivy
-    #      return semgrep.normalise(raw)
-    raise NotImplementedError(f"Normaliser for source '{source}' not yet implemented.")
-
-
-def validate_event(event: dict) -> bool:
-    # TODO (Phase 2): validate event against normalizer/schemas/event.schema.json
-    # Use jsonschema.validate() — fail fast on schema violations
-    return True
-
-
-def route_events(events: list[dict], config: dict) -> None:
-    # TODO (Phase 2): for each event, call each enabled integration client
-    # from integrations.wazuh.client import WazuhClient
-    # from integrations.defectdojo.client import DefectDojoClient
-    # from integrations.slack.client import SlackClient
-    for event in events:
-        log.info("Routing event: %s  severity=%s", event.get("event_id"), event.get("severity"))
-
-
-def write_evidence(events: list[dict], config: dict) -> None:
-    # TODO (Phase 2): write each event as a timestamped JSON file under evidence/
-    # Use config["evidence"]["output_dir"] for the path
-    pass
+    return parsers[source](input_path, source_meta)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="SecureOps normaliser — convert tool output to SecurityEvents"
+        description="SecureOps normaliser — convert tool output to SecurityEvents and route to integrations"
     )
-    parser.add_argument("--input", required=True, help="Path to raw tool output (JSON)")
-    parser.add_argument("--source", default=None, help="Source tool name (e.g. semgrep, trivy)")
     parser.add_argument(
-        "--config", default="config/config.yaml", help="Path to SecureOps config file"
+        "--input",
+        required=True,
+        help=(
+            "Path to a SecurePipe reports/raw/ directory, "
+            "or to a single tool JSON file (requires --source)"
+        ),
+    )
+    parser.add_argument(
+        "--source",
+        default=None,
+        help="Source tool when --input is a single file: semgrep | sca | trivy | zap",
+    )
+    parser.add_argument(
+        "--config",
+        default="config/config.yaml",
+        help="Path to SecureOps config file (default: config/config.yaml)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Normalise and validate events but do not send to integrations or write evidence",
     )
     args = parser.parse_args()
 
-    config = load_config(args.config)
-    raw = load_raw_input(args.input)
+    # ── Config ────────────────────────────────────────────────────────────────
+    try:
+        config = cfg.load(args.config)
+    except FileNotFoundError as e:
+        log.warning("%s — running with empty config (no integrations will be active)", e)
+        config = {}
 
-    source = args.source or detect_source(raw)
-    log.info("Source: %s", source)
+    meta = cfg.source_meta(config)
+    drop_sev = cfg.drop_below(config)
+    ev_dir = cfg.evidence_dir(config)
 
-    events = normalise(raw, source)
-    log.info("Produced %d events", len(events))
+    # ── Load and normalise ────────────────────────────────────────────────────
+    input_path = Path(args.input)
 
-    valid_events = [e for e in events if validate_event(e)]
-    log.info("%d events passed schema validation", len(valid_events))
+    if input_path.is_dir():
+        log.info("Mode: SecurePipe raw directory (%s)", input_path)
+        events = securepipe_loader.load(str(input_path), meta)
+    elif input_path.is_file():
+        if not args.source:
+            log.error("--source is required when --input is a single file")
+            sys.exit(1)
+        log.info("Mode: single file (%s, source=%s)", input_path, args.source)
+        events = _load_single_file(input_path, args.source, meta)
+    else:
+        log.error("Input not found: %s", args.input)
+        sys.exit(1)
 
-    route_events(valid_events, config)
-    write_evidence(valid_events, config)
+    log.info("Produced %d raw event(s)", len(events))
 
-    log.info("Done.")
+    # ── Filter by minimum severity ────────────────────────────────────────────
+    events = [
+        e for e in events
+        if cfg.severity_passes(e.get("severity", "info"), drop_sev)
+    ]
+    log.info("%d event(s) meet the minimum severity (%s)", len(events), drop_sev)
+
+    # ── Validate ──────────────────────────────────────────────────────────────
+    events = validator.validate_batch(events)
+    log.info("%d event(s) passed schema validation", len(events))
+
+    if not events:
+        log.info("No events to process. Done.")
+        return
+
+    if args.dry_run:
+        log.info("Dry run — skipping routing and evidence writing")
+        for e in events:
+            log.info("  [%s] %s — %s", e["severity"].upper(), e["source"]["tool"], e["title"])
+        return
+
+    # ── Route to integrations ─────────────────────────────────────────────────
+    route(events, config)
+
+    # ── Write evidence ────────────────────────────────────────────────────────
+    evidence.write_batch(events, ev_dir)
+
+    log.info("Done. Processed %d event(s).", len(events))
 
 
 if __name__ == "__main__":

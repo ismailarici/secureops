@@ -1,0 +1,44 @@
+{
+  "site": [
+    {
+      "alerts": [
+        {
+          "alert": "SQL Injection",
+          "riskdesc": "HIGH (Confirmed)",
+          "desc": "SQL injection may be possible. The attacker is able to craft SQL queries that are executed against the database.",
+          "solution": "Do not trust client-side input. Escape all data received from the client. Apply an allowlist of acceptable inputs that strictly conform to specifications. Implement parameterized queries or stored procedures.",
+          "cweid": "89",
+          "reference": "https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html",
+          "uri": "http://localhost:5000/login",
+          "method": "POST",
+          "param": "username",
+          "evidence": "AND 1=1"
+        },
+        {
+          "alert": "Content Security Policy (CSP) Header Not Set",
+          "riskdesc": "MEDIUM (Warning)",
+          "desc": "Content Security Policy (CSP) is an added layer of security that helps to detect and mitigate certain types of attacks, including Cross Site Scripting (XSS) and data injection attacks.",
+          "solution": "Ensure that your web server, application server, load balancer, etc. is configured to set the Content-Security-Policy header.",
+          "cweid": "693",
+          "reference": "https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP",
+          "uri": "http://localhost:5000/",
+          "method": "GET",
+          "param": "",
+          "evidence": ""
+        },
+        {
+          "alert": "Missing Anti-clickjacking Header",
+          "riskdesc": "MEDIUM (Warning)",
+          "desc": "The response does not protect against clickjacking attacks. It should include either Content-Security-Policy with the frame-ancestors directive or X-Frame-Options header.",
+          "solution": "Modern Web browsers support the Content-Security-Policy and X-Frame-Options HTTP headers. Ensure one of them is set on all web pages returned by your site.",
+          "cweid": "1021",
+          "reference": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Frame-Options",
+          "uri": "http://localhost:5000/",
+          "method": "GET",
+          "param": "",
+          "evidence": ""
+        }
+      ]
+    }
+  ]
+}

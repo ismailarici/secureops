@@ -1,8 +1,9 @@
 """
 Wazuh integration — forwards normalised SecurityEvents to a Wazuh manager
-via the Wazuh REST API.
+via the Wazuh REST API (v4.2+).
 
-Each event is mapped to a Wazuh alert with an appropriate rule level.
+Auth:  POST /security/user/authenticate  (Basic auth) → JWT token
+Send:  POST /events                      (Bearer token) → log ingestion
 
 Configuration keys (from config.yaml):
     integrations.wazuh.url
@@ -12,59 +13,80 @@ Configuration keys (from config.yaml):
     integrations.wazuh.min_severity
 """
 
+import json
 import logging
+
+import requests
+from requests.auth import HTTPBasicAuth
 
 log = logging.getLogger(__name__)
 
-# Wazuh rule levels mapped from SecureOps severity.
-# Wazuh uses 0–15; we use a conservative mapping that avoids
-# collisions with built-in Wazuh rules (which use 0–12).
-SEVERITY_TO_LEVEL = {
-    "critical": 15,
-    "high": 12,
-    "medium": 9,
-    "low": 6,
-    "info": 3,
-}
+SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"]
 
 
 class WazuhClient:
     def __init__(self, config: dict) -> None:
-        self.url = config.get("url", "")
-        self.port = config.get("port", 55000)
-        self.username = config.get("username", "")
-        self.password = config.get("password", "")
-        self.min_severity = config.get("min_severity", "medium")
-        # TODO (Phase 2): initialise authenticated HTTP session against the Wazuh API
-        self._session = None
+        base = config.get("url", "").rstrip("/")
+        port = config.get("port", 55000)
+        self._base_url = f"{base}:{port}"
+        self._username = config.get("username", "")
+        self._password = config.get("password", "")
+        self._min_severity = config.get("min_severity", "medium")
+        self._token: str | None = None
 
     def _authenticate(self) -> None:
-        # TODO (Phase 2): POST /security/user/authenticate to obtain a JWT token
-        # Store token in self._session headers for subsequent requests
-        raise NotImplementedError
+        url = f"{self._base_url}/security/user/authenticate"
+        try:
+            resp = requests.post(
+                url,
+                auth=HTTPBasicAuth(self._username, self._password),
+                verify=True,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            self._token = resp.json()["data"]["token"]
+            log.debug("Wazuh: authenticated successfully")
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(f"Wazuh authentication failed: {e}") from e
+
+    def _headers(self) -> dict:
+        if not self._token:
+            self._authenticate()
+        return {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
+
+    def _post_events(self, payload: dict) -> None:
+        url = f"{self._base_url}/events"
+        try:
+            resp = requests.post(url, json=payload, headers=self._headers(), timeout=10)
+            if resp.status_code == 401:
+                # Token expired — re-auth once and retry
+                self._token = None
+                resp = requests.post(url, json=payload, headers=self._headers(), timeout=10)
+            resp.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(f"Wazuh event POST failed: {e}") from e
 
     def send_event(self, event: dict) -> None:
-        """Send a single normalised SecurityEvent to Wazuh."""
         if not self._should_send(event):
             return
-        # TODO (Phase 2): map event to Wazuh alert payload and POST to the API
-        # Endpoint: POST /events
-        # Payload: { "events": [ <wazuh-alert-format> ] }
-        log.debug("Would send event %s to Wazuh", event.get("event_id"))
+        # Wazuh /events expects a list of plain strings — we send the event as a JSON string
+        log_line = json.dumps({
+            "secureops": True,
+            "event_id": event.get("event_id"),
+            "source": event.get("source", {}),
+            "event_type": event.get("event_type"),
+            "severity": event.get("severity"),
+            "title": event.get("title"),
+        }, separators=(",", ":"))
+        self._post_events({"events": [log_line]})
+        log.debug("Wazuh: sent event %s", event.get("event_id"))
 
     def send_events(self, events: list[dict]) -> None:
-        """Send a batch of normalised SecurityEvents to Wazuh."""
         for event in events:
             self.send_event(event)
 
     def _should_send(self, event: dict) -> bool:
-        """Return True if the event meets the configured minimum severity."""
-        levels = list(SEVERITY_TO_LEVEL.keys())
-        event_level = levels.index(event.get("severity", "info"))
-        min_level = levels.index(self.min_severity)
-        return event_level <= min_level
-
-    def _build_wazuh_payload(self, event: dict) -> dict:
-        # TODO (Phase 2): translate a SecurityEvent into the Wazuh API event format
-        # Include: rule level, description, source tool, affected resource
-        raise NotImplementedError
+        try:
+            return SEVERITY_ORDER.index(event.get("severity", "info")) <= SEVERITY_ORDER.index(self._min_severity)
+        except ValueError:
+            return True

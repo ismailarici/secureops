@@ -1,0 +1,71 @@
+<!--
+  SecureOps custom Wazuh detection rules.
+
+  Deploy by copying this file to:
+    /var/ossec/etc/rules/secureops.xml
+  on your Wazuh manager, then running:
+    systemctl restart wazuh-manager
+
+  Rule ID range 100000–100099 is reserved for SecureOps.
+  Adjust IDs if they conflict with existing custom rules.
+-->
+
+<group name="secureops,">
+
+  <!-- Base rule: match any SecureOps event (JSON with source.component field) -->
+  <rule id="100000" level="0">
+    <decoded_as>json</decoded_as>
+    <field name="secureops">\.+</field>
+    <description>SecureOps security event ingested</description>
+    <options>no_log</options>
+  </rule>
+
+  <!-- Critical finding -->
+  <rule id="100001" level="15">
+    <if_sid>100000</if_sid>
+    <field name="severity">critical</field>
+    <description>SecureOps: CRITICAL finding from $(source.tool) — $(title)</description>
+    <group>vulnerability,critical,</group>
+  </rule>
+
+  <!-- High finding -->
+  <rule id="100002" level="12">
+    <if_sid>100000</if_sid>
+    <field name="severity">high</field>
+    <description>SecureOps: HIGH finding from $(source.tool) — $(title)</description>
+    <group>vulnerability,high,</group>
+  </rule>
+
+  <!-- Medium finding -->
+  <rule id="100003" level="9">
+    <if_sid>100000</if_sid>
+    <field name="severity">medium</field>
+    <description>SecureOps: MEDIUM finding from $(source.tool) — $(title)</description>
+    <group>vulnerability,medium,</group>
+  </rule>
+
+  <!-- SAST-specific -->
+  <rule id="100010" level="0">
+    <if_sid>100001, 100002</if_sid>
+    <field name="source.tool">semgrep</field>
+    <description>SecureOps: SAST finding — $(title)</description>
+    <group>sast,</group>
+  </rule>
+
+  <!-- Container scan specific -->
+  <rule id="100011" level="0">
+    <if_sid>100001, 100002</if_sid>
+    <field name="source.tool">trivy</field>
+    <description>SecureOps: Container vulnerability — $(title)</description>
+    <group>container,sca,</group>
+  </rule>
+
+  <!-- DAST specific -->
+  <rule id="100012" level="0">
+    <if_sid>100001, 100002</if_sid>
+    <field name="source.tool">zap</field>
+    <description>SecureOps: DAST finding — $(title)</description>
+    <group>dast,</group>
+  </rule>
+
+</group>

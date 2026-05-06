@@ -1,0 +1,46 @@
+{
+  "results": [
+    {
+      "check_id": "python.flask.security.injection.sql.sql-injection",
+      "path": "app/users.py",
+      "start": {"line": 42},
+      "extra": {
+        "severity": "ERROR",
+        "message": "User-controlled input passed directly to a SQL query without parameterisation. An attacker can manipulate the query to read, modify, or delete arbitrary data.",
+        "lines": "cursor.execute('SELECT * FROM users WHERE id=' + user_id)",
+        "metadata": {
+          "references": [
+            "https://cwe.mitre.org/data/definitions/89.html",
+            "https://owasp.org/Top10/A03_2021-Injection/"
+          ]
+        }
+      }
+    },
+    {
+      "check_id": "python.lang.security.deserialization.avoid-pickle",
+      "path": "app/session.py",
+      "start": {"line": 17},
+      "extra": {
+        "severity": "ERROR",
+        "message": "Deserializing untrusted data with pickle can lead to remote code execution.",
+        "lines": "obj = pickle.loads(data)",
+        "metadata": {
+          "references": ["https://cwe.mitre.org/data/definitions/502.html"]
+        }
+      }
+    },
+    {
+      "check_id": "python.lang.security.audit.hardcoded-password",
+      "path": "app/config.py",
+      "start": {"line": 5},
+      "extra": {
+        "severity": "WARNING",
+        "message": "Hardcoded password found. Move credentials to environment variables or a secrets manager.",
+        "lines": "DB_PASSWORD = 'supersecret123'",
+        "metadata": {
+          "references": ["https://cwe.mitre.org/data/definitions/259.html"]
+        }
+      }
+    }
+  ]
+}

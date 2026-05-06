@@ -1,6 +1,5 @@
 """
-Slack integration — posts structured security alert messages to a Slack
-channel via an incoming webhook.
+Slack integration — posts Block Kit alert messages via an incoming webhook.
 
 Configuration keys (from config.yaml):
     integrations.slack.webhook_url
@@ -11,9 +10,13 @@ Configuration keys (from config.yaml):
 
 import logging
 
+import requests
+
 log = logging.getLogger(__name__)
 
-SEVERITY_EMOJI = {
+SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"]
+
+_EMOJI = {
     "critical": ":red_circle:",
     "high": ":large_orange_circle:",
     "medium": ":large_yellow_circle:",
@@ -21,45 +24,85 @@ SEVERITY_EMOJI = {
     "info": ":information_source:",
 }
 
-SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"]
+_COLOUR = {
+    "critical": "#CC0000",
+    "high": "#E05C00",
+    "medium": "#E0A000",
+    "low": "#888888",
+    "info": "#4A90D9",
+}
 
 
 class SlackClient:
     def __init__(self, config: dict) -> None:
-        self.webhook_url = config.get("webhook_url", "")
-        self.channel = config.get("channel", "#security-alerts")
-        self.min_severity = config.get("min_severity", "high")
-        self.mention_on_critical = config.get("mention_on_critical", "")
+        self._webhook = config.get("webhook_url", "")
+        self._channel = config.get("channel", "#security-alerts")
+        self._min_severity = config.get("min_severity", "high")
+        self._mention = config.get("mention_on_critical", "")
 
     def send_alert(self, event: dict) -> None:
-        """Send a single normalised SecurityEvent as a Slack message."""
         if not self._should_send(event):
             return
         payload = self._build_message(event)
-        # TODO (Phase 2): POST payload to self.webhook_url using requests
-        # Do not log the webhook URL (treat it as a credential)
-        log.debug("Would post Slack alert for event %s", event.get("event_id"))
+        try:
+            resp = requests.post(self._webhook, json=payload, timeout=10)
+            resp.raise_for_status()
+            log.debug("Slack: sent alert for event %s", event.get("event_id"))
+        except requests.exceptions.RequestException as e:
+            log.error("Slack: failed to send alert: %s", e)
 
-    def send_alerts(self, events: list[dict]) -> None:
+    def send_events(self, events: list[dict]) -> None:
         for event in events:
             self.send_alert(event)
 
     def _should_send(self, event: dict) -> bool:
-        event_idx = SEVERITY_ORDER.index(event.get("severity", "info"))
-        min_idx = SEVERITY_ORDER.index(self.min_severity)
-        return event_idx <= min_idx
+        try:
+            return SEVERITY_ORDER.index(event.get("severity", "info")) <= SEVERITY_ORDER.index(self._min_severity)
+        except ValueError:
+            return True
 
     def _build_message(self, event: dict) -> dict:
-        # TODO (Phase 2): build a Slack Block Kit payload
-        # Include: severity emoji, title, source tool, environment, affected file/resource,
-        #          link to evidence artifact, @mention if critical
         severity = event.get("severity", "info")
-        emoji = SEVERITY_EMOJI.get(severity, "")
+        emoji = _EMOJI.get(severity, "")
+        colour = _COLOUR.get(severity, "#888888")
+        source = event.get("source", {})
+        payload = event.get("payload", {})
+        tool = source.get("tool", "unknown")
+        env = source.get("environment") or "—"
+        affected = payload.get("affected_file") or payload.get("affected_package") or "—"
         title = event.get("title", "Security event")
-        mention = ""
-        if severity == "critical" and self.mention_on_critical:
-            mention = f"{self.mention_on_critical} "
+        desc = (event.get("description") or "")[:300]
+        mention = f"{self._mention} " if severity == "critical" and self._mention else ""
+
+        blocks = [
+            {
+                "type": "header",
+                "text": {"type": "plain_text", "text": f"{emoji} {severity.upper()} — {title}"},
+            },
+            {
+                "type": "section",
+                "fields": [
+                    {"type": "mrkdwn", "text": f"*Tool:* {tool}"},
+                    {"type": "mrkdwn", "text": f"*Environment:* {env}"},
+                    {"type": "mrkdwn", "text": f"*Affected:* {affected}"},
+                    {"type": "mrkdwn", "text": f"*Event ID:* `{event.get('event_id', '—')}`"},
+                ],
+            },
+        ]
+
+        if desc:
+            blocks.append({
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": desc},
+            })
+
+        if mention:
+            blocks.append({
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": mention},
+            })
+
         return {
-            "channel": self.channel,
-            "text": f"{mention}{emoji} *{severity.upper()}* — {title}",
+            "channel": self._channel,
+            "attachments": [{"color": colour, "blocks": blocks}],
         }

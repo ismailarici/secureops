@@ -1,0 +1,54 @@
+{
+  "Results": [
+    {
+      "Target": "python:3.9-slim (debian 11.6)",
+      "Type": "debian",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2023-0286",
+          "PkgName": "libssl1.1",
+          "InstalledVersion": "1.1.1n-0+deb11u3",
+          "FixedVersion": "1.1.1n-0+deb11u4",
+          "Severity": "HIGH",
+          "Title": "openssl: X.400 address type confusion in X.509 GeneralName",
+          "Description": "There is a type confusion vulnerability relating to X.400 address processing inside an X.509 GeneralName. X.400 addresses were parsed as an ASN1_STRING but the public structure definition for GENERAL_NAME incorrectly specified the type of the x400Address field as ASN1_TYPE.",
+          "References": [
+            "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2023-0286",
+            "https://nvd.nist.gov/vuln/detail/CVE-2023-0286"
+          ]
+        },
+        {
+          "VulnerabilityID": "CVE-2022-4450",
+          "PkgName": "libssl1.1",
+          "InstalledVersion": "1.1.1n-0+deb11u3",
+          "FixedVersion": "1.1.1n-0+deb11u4",
+          "Severity": "HIGH",
+          "Title": "openssl: double free after calling PEM_read_bio_ex",
+          "Description": "The function PEM_read_bio_ex() reads a PEM file from a BIO and parses and decodes the name and header. The header may optionally be followed by additional text.",
+          "References": [
+            "https://nvd.nist.gov/vuln/detail/CVE-2022-4450"
+          ]
+        }
+      ]
+    },
+    {
+      "Target": "app/requirements.txt",
+      "Type": "pip",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2020-14343",
+          "PkgName": "PyYAML",
+          "InstalledVersion": "5.3.1",
+          "FixedVersion": "5.4",
+          "Severity": "CRITICAL",
+          "Title": "PyYAML: arbitrary code execution through python/object/apply constructor",
+          "Description": "A vulnerability was discovered in the PyYAML library in versions before 5.4.",
+          "References": [
+            "https://nvd.nist.gov/vuln/detail/CVE-2020-14343",
+            "https://github.com/advisories/GHSA-8q59-q68h-6hv4"
+          ]
+        }
+      ]
+    }
+  ]
+}
