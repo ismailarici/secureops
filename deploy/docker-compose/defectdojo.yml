@@ -1,0 +1,130 @@
+# DefectDojo stack
+#
+# Includes: Django app, Nginx, PostgreSQL, Redis, Celery worker and beat.
+# The SecureOps DefectDojo client connects on port 8080.
+#
+# Setup (first time only):
+#   make defectdojo-up    — start the stack (first start takes 2–3 minutes)
+#   make defectdojo-init  — create the admin user and set the API token
+#
+# Default credentials:
+#   URL:  http://localhost:8080
+#   User: admin / ${DD_ADMIN_PASSWORD}
+#
+# Get your API token after first login:
+#   http://localhost:8080/api/key-v2
+
+services:
+
+  db:
+    image: postgres:16.3-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: defectdojo
+      POSTGRES_USER: defectdojo
+      POSTGRES_PASSWORD: ${DD_DB_PASSWORD:-defectdojo_db_pass}
+    volumes:
+      - defectdojo_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U defectdojo"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - defectdojo-net
+
+  redis:
+    image: redis:7.2.4-alpine
+    restart: unless-stopped
+    volumes:
+      - defectdojo_redis:/data
+    networks:
+      - defectdojo-net
+
+  django:
+    image: defectdojo/defectdojo-django:2.36.3
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DD_DATABASE_URL: postgresql://defectdojo:${DD_DB_PASSWORD:-defectdojo_db_pass}@db/defectdojo
+      DD_CELERY_BROKER_URL: redis://redis:6379/0
+      DD_SECRET_KEY: ${DD_SECRET_KEY:-change-me-in-production-32-chars-min}
+      DD_CREDENTIAL_AES_256_KEY: ${DD_CREDENTIAL_AES_256_KEY:-change-me-in-production-16chars}
+      DD_ADMIN_USER: admin
+      DD_ADMIN_PASSWORD: ${DD_ADMIN_PASSWORD:-SecureOps_DD!23}
+      DD_ADMIN_FIRST_NAME: Admin
+      DD_ADMIN_LAST_NAME: User
+      DD_ADMIN_MAIL: ${DD_ADMIN_MAIL:-admin@example.com}
+      DD_ALLOWED_HOSTS: "*"
+      DD_DEBUG: "False"
+      DD_TIME_ZONE: UTC
+    volumes:
+      - defectdojo_media:/app/media
+    networks:
+      - defectdojo-net
+
+  celeryworker:
+    image: defectdojo/defectdojo-django:2.36.3
+    restart: unless-stopped
+    entrypoint: ["/entrypoint-celery-worker.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DD_DATABASE_URL: postgresql://defectdojo:${DD_DB_PASSWORD:-defectdojo_db_pass}@db/defectdojo
+      DD_CELERY_BROKER_URL: redis://redis:6379/0
+      DD_SECRET_KEY: ${DD_SECRET_KEY:-change-me-in-production-32-chars-min}
+      DD_CREDENTIAL_AES_256_KEY: ${DD_CREDENTIAL_AES_256_KEY:-change-me-in-production-16chars}
+    volumes:
+      - defectdojo_media:/app/media
+    networks:
+      - defectdojo-net
+
+  celerybeat:
+    image: defectdojo/defectdojo-django:2.36.3
+    restart: unless-stopped
+    entrypoint: ["/entrypoint-celery-beat.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DD_DATABASE_URL: postgresql://defectdojo:${DD_DB_PASSWORD:-defectdojo_db_pass}@db/defectdojo
+      DD_CELERY_BROKER_URL: redis://redis:6379/0
+      DD_SECRET_KEY: ${DD_SECRET_KEY:-change-me-in-production-32-chars-min}
+      DD_CREDENTIAL_AES_256_KEY: ${DD_CREDENTIAL_AES_256_KEY:-change-me-in-production-16chars}
+    volumes:
+      - defectdojo_media:/app/media
+    networks:
+      - defectdojo-net
+
+  nginx:
+    image: defectdojo/defectdojo-nginx:2.36.3
+    restart: unless-stopped
+    ports:
+      - "8080:8080"           # HTTP — SecureOps connects here
+      - "8443:8443"           # HTTPS (optional)
+    environment:
+      NGINX_METRICS_ENABLED: "false"
+    volumes:
+      - defectdojo_media:/usr/share/nginx/html/media
+    depends_on:
+      - django
+    networks:
+      - defectdojo-net
+
+volumes:
+  defectdojo_db:
+  defectdojo_redis:
+  defectdojo_media:
+
+networks:
+  defectdojo-net:
+    driver: bridge

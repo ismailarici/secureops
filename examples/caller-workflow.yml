@@ -1,0 +1,81 @@
+# Example: how to call SecureOps from your app's security pipeline.
+#
+# This workflow:
+#   1. Runs the SecurePipe CLI against your application code
+#   2. Uploads the raw JSON reports as a GitHub artifact
+#   3. Calls the SecureOps reusable workflow to normalise, route, and package evidence
+#
+# Prerequisites:
+#   - SecurePipe is cloned and available (or installed)
+#   - SECUREOPS_CONFIG secret is set in your repo/org settings with the
+#     full content of your config/config.yaml
+#
+# To use:
+#   Copy this file to .github/workflows/security.yml in your application repo.
+#   Adjust the securepipe-cli job for your language and setup.
+
+name: Security Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 3 * * 1"   # weekly on Monday at 03:00 UTC
+
+jobs:
+
+  # ── Step 1: Run SecurePipe CLI and upload raw JSON ──────────────────────────
+  securepipe-cli:
+    name: SecurePipe — Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout app
+        uses: actions/checkout@v4
+
+      - name: Checkout SecurePipe
+        uses: actions/checkout@v4
+        with:
+          repository: ismailarici/securepipe
+          path: securepipe-tool
+          ref: main
+
+      - name: Run SecurePipe scan
+        run: |
+          chmod +x securepipe-tool/securepipe
+          securepipe-tool/securepipe scan \
+            --target ./app \
+            --output-dir reports
+
+      - name: Upload raw SecurePipe reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: securepipe-raw-reports      # must match raw-artifact-name below
+          path: reports/raw/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: securepipe-html-report
+          path: reports/security-report.html
+          if-no-files-found: warn
+          retention-days: 30
+
+  # ── Step 2: Call SecureOps ──────────────────────────────────────────────────
+  secureops:
+    name: SecureOps — Normalise & Route
+    needs: securepipe-cli
+    if: always()    # run even if securepipe-cli fails, to capture partial results
+    uses: ismailarici/secureops/.github/workflows/secureops-pipeline.yml@main
+    with:
+      raw-artifact-name: securepipe-raw-reports
+      evidence-retention-days: 90
+      dry-run: false
+    secrets:
+      SECUREOPS_CONFIG: ${{ secrets.SECUREOPS_CONFIG }}

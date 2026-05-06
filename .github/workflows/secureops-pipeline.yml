@@ -1,0 +1,150 @@
+name: SecureOps Pipeline
+
+# Reusable workflow — call this from your app's CI pipeline after SecurePipe runs.
+#
+# What it does:
+#   1. Downloads the SecurePipe raw JSON artifact produced by your pipeline
+#   2. Installs SecureOps and runs the normaliser
+#   3. Routes events to configured integrations (Wazuh, DefectDojo, Slack, email)
+#   4. Packages all evidence into a ZIP and uploads it as a build artifact
+#
+# How to call it — add this job to your .github/workflows/security.yml:
+#
+#   secureops:
+#     needs: securepipe-cli       # the job that ran ./securepipe scan
+#     uses: ismailarici/secureops/.github/workflows/secureops-pipeline.yml@main
+#     with:
+#       raw-artifact-name: securepipe-raw-reports
+#     secrets:
+#       SECUREOPS_CONFIG: ${{ secrets.SECUREOPS_CONFIG }}
+#
+# See examples/caller-workflow.yml for a complete example.
+
+on:
+  workflow_call:
+    inputs:
+      raw-artifact-name:
+        description: "Name of the artifact containing SecurePipe reports/raw/ JSON files"
+        type: string
+        default: "securepipe-raw-reports"
+      python-version:
+        description: "Python version to use"
+        type: string
+        default: "3.11"
+      evidence-retention-days:
+        description: "How long to retain the evidence bundle artifact (days)"
+        type: number
+        default: 90
+      dry-run:
+        description: "Normalise and validate but do not route to integrations"
+        type: boolean
+        default: false
+    secrets:
+      SECUREOPS_CONFIG:
+        description: |
+          Full content of config/config.yaml. Store as a repository or organisation secret.
+          If not provided, SecureOps runs with no integrations (evidence is still written).
+        required: false
+
+jobs:
+  secureops:
+    name: SecureOps — Normalise & Route
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout SecureOps
+        uses: actions/checkout@v4
+        with:
+          repository: ismailarici/secureops
+          ref: main
+
+      - name: Set up Python ${{ inputs.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download SecurePipe raw reports
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.raw-artifact-name }}
+          path: reports/raw
+        continue-on-error: true   # pipeline still runs even if artifact is missing
+
+      - name: Check for reports
+        id: check-reports
+        run: |
+          if ls reports/raw/*.json 1>/dev/null 2>&1; then
+            echo "found=true" >> $GITHUB_OUTPUT
+            echo "Found $(ls reports/raw/*.json | wc -l) raw report file(s)."
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+            echo "No raw report files found in reports/raw/ — skipping normalisation."
+          fi
+
+      - name: Write SecureOps config
+        run: |
+          mkdir -p config
+          if [ -n "$SECUREOPS_CONFIG" ]; then
+            echo "$SECUREOPS_CONFIG" > config/config.yaml
+            echo "Config written from secret."
+          else
+            echo "No SECUREOPS_CONFIG secret set — running with no integrations."
+          fi
+        env:
+          SECUREOPS_CONFIG: ${{ secrets.SECUREOPS_CONFIG }}
+
+      - name: Run SecureOps normaliser
+        if: steps.check-reports.outputs.found == 'true'
+        run: |
+          ARGS="--input reports/raw"
+          if [ "${{ inputs.dry-run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          python3 -m normalizer.main $ARGS
+
+      - name: Package evidence bundle
+        if: steps.check-reports.outputs.found == 'true' && inputs.dry-run == false
+        run: python3 scripts/package_evidence.py
+
+      - name: Upload evidence bundle
+        if: steps.check-reports.outputs.found == 'true' && inputs.dry-run == false
+        uses: actions/upload-artifact@v4
+        with:
+          name: secureops-evidence-bundle
+          path: evidence-bundle-*.zip
+          if-no-files-found: warn
+          retention-days: ${{ inputs.evidence-retention-days }}
+
+      - name: Upload raw evidence files
+        if: steps.check-reports.outputs.found == 'true' && inputs.dry-run == false
+        uses: actions/upload-artifact@v4
+        with:
+          name: secureops-evidence-raw
+          path: evidence/
+          if-no-files-found: warn
+          retention-days: ${{ inputs.evidence-retention-days }}
+
+      - name: Write pipeline summary
+        if: always()
+        run: |
+          echo "## SecureOps Pipeline" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.check-reports.outputs.found }}" = "true" ]; then
+            EVENTS=$(ls evidence/*.json 2>/dev/null | wc -l || echo 0)
+            echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Raw report files | $(ls reports/raw/*.json 2>/dev/null | wc -l) |" >> $GITHUB_STEP_SUMMARY
+            echo "| Events produced | $EVENTS |" >> $GITHUB_STEP_SUMMARY
+            echo "| Evidence bundle | \`evidence-bundle-*.zip\` |" >> $GITHUB_STEP_SUMMARY
+            if [ -f config/config.yaml ]; then
+              echo "| Config | loaded from secret |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| Config | not set — no integrations active |" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "> No SecurePipe raw reports found. Artifact \`${{ inputs.raw-artifact-name }}\` was not available." >> $GITHUB_STEP_SUMMARY
+          fi

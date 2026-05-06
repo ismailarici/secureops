@@ -1,5 +1,7 @@
 # Config (contains credentials)
 config/config.yaml
+deploy/docker-compose/.env
+deploy/docker-compose/config/certs/
 
 # Evidence artifacts
 evidence/

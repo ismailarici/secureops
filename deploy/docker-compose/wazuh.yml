@@ -1,0 +1,136 @@
+# Wazuh single-node stack
+#
+# Includes: manager, indexer (OpenSearch), and dashboard.
+# The SecureOps Wazuh client connects to the manager API on port 55000.
+#
+# Setup (first time only):
+#   make wazuh-certs    — generate SSL certificates into config/certs/
+#   make wazuh-up       — start the stack
+#
+# Default credentials (change in .env before first start):
+#   Dashboard:  https://localhost  admin / ${WAZUH_INDEXER_PASSWORD}
+#   API:        https://localhost:55000  wazuh-wui / ${WAZUH_API_PASSWORD}
+#
+# Reference: https://documentation.wazuh.com/current/deployment-options/docker/wazuh-container.html
+
+services:
+
+  wazuh.manager:
+    image: wazuh/wazuh-manager:4.8.0
+    hostname: wazuh.manager
+    restart: unless-stopped
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 655360
+        hard: 655360
+    ports:
+      - "1514:1514"           # agent log ingestion
+      - "1515:1515"           # agent enrollment
+      - "514:514/udp"         # syslog
+      - "55000:55000"         # REST API — SecureOps connects here
+    environment:
+      INDEXER_URL: https://wazuh.indexer:9200
+      INDEXER_USERNAME: admin
+      INDEXER_PASSWORD: ${WAZUH_INDEXER_PASSWORD:-SecureOps_Ind3x!}
+      FILEBEAT_SSL_VERIFICATION_MODE: full
+      SSL_CERTIFICATE_AUTHORITIES: /etc/ssl/root-ca.pem
+      SSL_CERTIFICATE: /etc/ssl/filebeat.pem
+      SSL_KEY: /etc/ssl/filebeat.key
+      API_USERNAME: wazuh-wui
+      API_PASSWORD: ${WAZUH_API_PASSWORD:-SecureOps_API!23}
+    volumes:
+      - wazuh_api_configuration:/var/ossec/api/configuration
+      - wazuh_etc:/var/ossec/etc
+      - wazuh_logs:/var/ossec/logs
+      - wazuh_queue:/var/ossec/queue
+      - wazuh_var_multigroups:/var/ossec/var/multigroups
+      - wazuh_integrations:/var/ossec/integrations
+      - wazuh_active_response:/var/ossec/active-response/bin
+      - wazuh_agentless:/var/ossec/agentless
+      - wazuh_wodles:/var/ossec/wodles
+      - filebeat_etc:/etc/filebeat
+      - filebeat_var:/var/lib/filebeat
+      - ./config/certs/root-ca-manager.pem:/etc/ssl/root-ca.pem
+      - ./config/certs/wazuh.manager.pem:/etc/ssl/filebeat.pem
+      - ./config/certs/wazuh.manager-key.pem:/etc/ssl/filebeat.key
+    networks:
+      - wazuh-net
+    depends_on:
+      wazuh.indexer:
+        condition: service_healthy
+
+  wazuh.indexer:
+    image: wazuh/wazuh-indexer:4.8.0
+    hostname: wazuh.indexer
+    restart: unless-stopped
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "9200:9200"           # OpenSearch HTTP — internal use only
+    environment:
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+      bootstrap.memory_lock: "true"
+      INDEXER_USERNAME: admin
+      INDEXER_PASSWORD: ${WAZUH_INDEXER_PASSWORD:-SecureOps_Ind3x!}
+    volumes:
+      - wazuh_indexer_data:/var/lib/wazuh-indexer
+      - ./config/certs/root-ca.pem:/usr/share/wazuh-indexer/certs/root-ca.pem
+      - ./config/certs/wazuh.indexer.pem:/usr/share/wazuh-indexer/certs/wazuh.indexer.pem
+      - ./config/certs/wazuh.indexer-key.pem:/usr/share/wazuh-indexer/certs/wazuh.indexer-key.pem
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -k https://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+    networks:
+      - wazuh-net
+
+  wazuh.dashboard:
+    image: wazuh/wazuh-dashboard:4.8.0
+    hostname: wazuh.dashboard
+    restart: unless-stopped
+    ports:
+      - "443:5601"            # HTTPS dashboard — open https://localhost
+    environment:
+      INDEXER_USERNAME: admin
+      INDEXER_PASSWORD: ${WAZUH_INDEXER_PASSWORD:-SecureOps_Ind3x!}
+      WAZUH_API_URL: https://wazuh.manager
+      DASHBOARD_USERNAME: kibanaserver
+      DASHBOARD_PASSWORD: ${WAZUH_DASHBOARD_PASSWORD:-SecureOps_D4sh!}
+      API_USERNAME: wazuh-wui
+      API_PASSWORD: ${WAZUH_API_PASSWORD:-SecureOps_API!23}
+    volumes:
+      - ./config/certs/root-ca.pem:/usr/share/wazuh-dashboard/certs/root-ca.pem
+      - ./config/certs/wazuh.dashboard.pem:/usr/share/wazuh-dashboard/certs/wazuh.dashboard.pem
+      - ./config/certs/wazuh.dashboard-key.pem:/usr/share/wazuh-dashboard/certs/wazuh.dashboard-key.pem
+    networks:
+      - wazuh-net
+    depends_on:
+      - wazuh.manager
+      - wazuh.indexer
+
+volumes:
+  wazuh_api_configuration:
+  wazuh_etc:
+  wazuh_logs:
+  wazuh_queue:
+  wazuh_var_multigroups:
+  wazuh_integrations:
+  wazuh_active_response:
+  wazuh_agentless:
+  wazuh_wodles:
+  filebeat_etc:
+  filebeat_var:
+  wazuh_indexer_data:
+
+networks:
+  wazuh-net:
+    driver: bridge
