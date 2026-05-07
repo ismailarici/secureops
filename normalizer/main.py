@@ -2,8 +2,11 @@
 Entry point for the SecureOps normaliser.
 
 Usage:
-    # Consume a full SecurePipe raw/ directory:
+    # Consume a SecurePipe raw/ directory:
     python -m normalizer.main --input /path/to/reports/raw
+
+    # Consume a SecureInfra normalized output directory:
+    python -m normalizer.main --input /path/to/secureinfra/outputs/normalized --source secureinfra
 
     # Consume a single JSON file (source tool must be specified):
     python -m normalizer.main --input semgrep.json --source semgrep
@@ -21,6 +24,7 @@ from normalizer import config as cfg
 from normalizer import evidence, validator
 from normalizer.router import route
 from normalizer.sources.securepipe import loader as securepipe_loader
+from normalizer.sources.secureinfra import loader as secureinfra_loader
 
 logging.basicConfig(
     level=logging.INFO,
@@ -65,7 +69,7 @@ def main() -> None:
     parser.add_argument(
         "--source",
         default=None,
-        help="Source tool when --input is a single file: semgrep | sca | trivy | zap",
+        help="Input source type: secureinfra (JSONL dir) | semgrep | sca | trivy | zap (single file)",
     )
     parser.add_argument(
         "--config",
@@ -93,7 +97,10 @@ def main() -> None:
     # ── Load and normalise ────────────────────────────────────────────────────
     input_path = Path(args.input)
 
-    if input_path.is_dir():
+    if input_path.is_dir() and args.source == "secureinfra":
+        log.info("Mode: SecureInfra normalized output directory (%s)", input_path)
+        events = secureinfra_loader.load(str(input_path))
+    elif input_path.is_dir():
         log.info("Mode: SecurePipe raw directory (%s)", input_path)
         events = securepipe_loader.load(str(input_path), meta)
     elif input_path.is_file():
