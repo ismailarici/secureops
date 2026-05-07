@@ -1,3 +1,6 @@
+COMPOSE_PROJECT := $(shell basename $(CURDIR))
+FILEBEAT_VOL    := $(COMPOSE_PROJECT)_filebeat_etc
+
 .PHONY: wazuh-up wazuh-init wazuh-down wazuh-logs \
         defectdojo-up defectdojo-down defectdojo-logs defectdojo-token \
         help
@@ -28,7 +31,10 @@ wazuh-up:
 	@echo "API:       https://localhost:55000  (wazuh-wui / see .env WAZUH_API_PASSWORD)"
 
 wazuh-init:
-	@echo "Initialising OpenSearch security index..."
+	@echo ">>> Step 1/4  Waiting for OpenSearch to accept connections..."
+	@until docker exec docker-compose-wazuh.indexer-1 \
+	    curl -sk https://localhost:9200 > /dev/null 2>&1; do sleep 5; done
+	@echo ">>> Step 2/4  Initialising OpenSearch security index..."
 	@docker exec docker-compose-wazuh.indexer-1 bash -c "\
 	  export JAVA_HOME=/usr/share/wazuh-indexer/jdk && \
 	  export PATH=\$$JAVA_HOME/bin:\$$PATH && \
@@ -39,7 +45,19 @@ wazuh-init:
 	    -cert /usr/share/wazuh-indexer/certs/admin.pem \
 	    -key /usr/share/wazuh-indexer/certs/admin-key.pem \
 	    -p 9200 -h 127.0.0.1"
-	@echo "Security index initialised. Wazuh should become healthy shortly."
+	@echo ">>> Step 3/4  Starting manager and dashboard (waits for indexer health check)..."
+	docker compose -f wazuh.yml --env-file .env up -d
+	@echo ">>> Step 4/4  Patching filebeat TLS config (removes stale cert-file references)..."
+	@until docker run --rm -v $(FILEBEAT_VOL):/data alpine sh -c \
+	    "grep -q 'output.elasticsearch' /data/filebeat.yml 2>/dev/null"; do sleep 3; done
+	@docker run --rm -v $(FILEBEAT_VOL):/data alpine sh -c "\
+	  sed -i '/ssl\.certificate_authorities:/d' /data/filebeat.yml; \
+	  sed -i '/ssl\.certificate:/d'             /data/filebeat.yml; \
+	  sed -i '/ssl\.key:/d'                     /data/filebeat.yml"
+	@docker compose -f wazuh.yml restart wazuh.manager
+	@echo ""
+	@echo "Wazuh stack fully initialised."
+	@echo "Dashboard: https://localhost   API: https://localhost:55000"
 
 wazuh-down:
 	docker compose -f wazuh.yml down
