@@ -15,6 +15,9 @@ venv/
 dist/
 build/
 
+# Claude instructions (local only)
+CLAUDE.md
+
 # OS
 .DS_Store
 *.swp
