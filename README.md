@@ -66,8 +66,16 @@ pip install -r requirements.txt
 cp config/example.yaml config/config.yaml
 # edit config/config.yaml with your credentials
 
-# Scan with SecurePipe first, then normalise its raw output:
+# Ingest SecurePipe findings (SAST / SCA / container / DAST):
 python3 -m normalizer.main --input /path/to/securepipe/reports/raw
+
+# Ingest SecureInfra findings (AWS CSPM / Prowler):
+python3 -m normalizer.main \
+  --input /path/to/secureinfra/outputs/normalized \
+  --source secureinfra
+
+# Run both sources together end-to-end (uses bundled example data):
+python3 scripts/test_combined.py
 
 # Pull live events from a cloud or identity source:
 python3 scripts/ingest.py --source cloudtrail --since 24h
@@ -95,6 +103,7 @@ All four phases are complete.
 | Area | Status |
 |------|--------|
 | SecurePipe source parsers (semgrep, trivy, pip-audit, npm-audit, owasp-dc, zap) | ✅ |
+| SecureInfra ingestor — reads pre-normalized Prowler JSONL output | ✅ |
 | Config loader with severity helpers | ✅ |
 | JSON schema validation | ✅ |
 | Evidence file writer | ✅ |
@@ -172,6 +181,7 @@ secureops/
 │   ├── schemas/event.schema.json       # canonical security event schema
 │   ├── sources/
 │   │   ├── securepipe/                 # semgrep, sca, trivy, zap parsers
+│   │   ├── secureinfra/                # SecureInfra JSONL pass-through loader
 │   │   ├── cloud/                      # cloudtrail, gcp_audit, azure_monitor
 │   │   └── identity/                   # okta, azure_ad, aws_iam
 │   ├── config.py                       # config loader
@@ -190,7 +200,8 @@ secureops/
 ├── rules/wazuh/secureops.xml           # custom Wazuh detection rules
 ├── scripts/
 │   ├── ingest.py                       # live cloud/identity ingestor CLI
-│   └── package_evidence.py             # evidence packaging CLI
+│   ├── package_evidence.py             # evidence packaging CLI
+│   └── test_combined.py                # end-to-end test: SecurePipe + SecureInfra → all integrations
 ├── deploy/docker-compose/
 │   ├── wazuh.yml                       # Wazuh single-node stack
 │   ├── defectdojo.yml                  # DefectDojo stack
@@ -202,6 +213,7 @@ secureops/
 ├── config/example.yaml                 # reference configuration
 ├── examples/
 │   ├── securepipe-raw/                 # sample SecurePipe JSON inputs
+│   ├── secureinfra-raw/                # sample SecureInfra JSONL output
 │   └── caller-workflow.yml             # example CI caller
 ├── evidence/                           # audit artifacts (gitignored)
 └── docs/event-schema.md                # schema documentation
