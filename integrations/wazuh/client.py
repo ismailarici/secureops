@@ -11,13 +11,17 @@ Configuration keys (from config.yaml):
     integrations.wazuh.username
     integrations.wazuh.password
     integrations.wazuh.min_severity
+    integrations.wazuh.verify_ssl    (default: false — demo certs are self-signed)
 """
 
 import json
 import logging
+import urllib3
 
 import requests
 from requests.auth import HTTPBasicAuth
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +36,7 @@ class WazuhClient:
         self._username = config.get("username", "")
         self._password = config.get("password", "")
         self._min_severity = config.get("min_severity", "medium")
+        self._verify_ssl = config.get("verify_ssl", False)
         self._token: str | None = None
 
     def _authenticate(self) -> None:
@@ -40,7 +45,7 @@ class WazuhClient:
             resp = requests.post(
                 url,
                 auth=HTTPBasicAuth(self._username, self._password),
-                verify=True,
+                verify=self._verify_ssl,
                 timeout=10,
             )
             resp.raise_for_status()
@@ -57,11 +62,11 @@ class WazuhClient:
     def _post_events(self, payload: dict) -> None:
         url = f"{self._base_url}/events"
         try:
-            resp = requests.post(url, json=payload, headers=self._headers(), timeout=10)
+            resp = requests.post(url, json=payload, headers=self._headers(), verify=self._verify_ssl, timeout=10)
             if resp.status_code == 401:
                 # Token expired — re-auth once and retry
                 self._token = None
-                resp = requests.post(url, json=payload, headers=self._headers(), timeout=10)
+                resp = requests.post(url, json=payload, headers=self._headers(), verify=self._verify_ssl, timeout=10)
             resp.raise_for_status()
         except requests.exceptions.RequestException as e:
             raise RuntimeError(f"Wazuh event POST failed: {e}") from e

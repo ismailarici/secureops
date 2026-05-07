@@ -4,8 +4,12 @@
 # The SecureOps Wazuh client connects to the manager API on port 55000.
 #
 # Setup (first time only):
-#   make wazuh-certs    — generate SSL certificates into config/certs/
 #   make wazuh-up       — start the stack
+#   make wazuh-init     — initialise OpenSearch security (run once after first start)
+#
+# Uses the demo TLS certificates built into the Wazuh images (consistent CA).
+# Custom cert mounts are intentionally omitted — the demo certs work correctly
+# with the pre-configured opensearch.yml (admin_dn / nodes_dn).
 #
 # Default credentials (change in .env before first start):
 #   Dashboard:  https://localhost  admin / ${WAZUH_INDEXER_PASSWORD}
@@ -34,11 +38,8 @@ services:
     environment:
       INDEXER_URL: https://wazuh.indexer:9200
       INDEXER_USERNAME: admin
-      INDEXER_PASSWORD: ${WAZUH_INDEXER_PASSWORD:-SecureOps_Ind3x!}
-      FILEBEAT_SSL_VERIFICATION_MODE: full
-      SSL_CERTIFICATE_AUTHORITIES: /etc/ssl/root-ca.pem
-      SSL_CERTIFICATE: /etc/ssl/filebeat.pem
-      SSL_KEY: /etc/ssl/filebeat.key
+      INDEXER_PASSWORD: ${WAZUH_INDEXER_PASSWORD:-admin}
+      FILEBEAT_SSL_VERIFICATION_MODE: none
       API_USERNAME: wazuh-wui
       API_PASSWORD: ${WAZUH_API_PASSWORD:-SecureOps_API!23}
     volumes:
@@ -53,9 +54,6 @@ services:
       - wazuh_wodles:/var/ossec/wodles
       - filebeat_etc:/etc/filebeat
       - filebeat_var:/var/lib/filebeat
-      - ./config/certs/root-ca-manager.pem:/etc/ssl/root-ca.pem
-      - ./config/certs/wazuh.manager.pem:/etc/ssl/filebeat.pem
-      - ./config/certs/wazuh.manager-key.pem:/etc/ssl/filebeat.key
     networks:
       - wazuh-net
     depends_on:
@@ -76,17 +74,14 @@ services:
     ports:
       - "9200:9200"           # OpenSearch HTTP — internal use only
     environment:
-      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m -XX:MaxDirectMemorySize=512m"
       bootstrap.memory_lock: "true"
       INDEXER_USERNAME: admin
       INDEXER_PASSWORD: ${WAZUH_INDEXER_PASSWORD:-SecureOps_Ind3x!}
     volumes:
       - wazuh_indexer_data:/var/lib/wazuh-indexer
-      - ./config/certs/root-ca.pem:/usr/share/wazuh-indexer/certs/root-ca.pem
-      - ./config/certs/wazuh.indexer.pem:/usr/share/wazuh-indexer/certs/wazuh.indexer.pem
-      - ./config/certs/wazuh.indexer-key.pem:/usr/share/wazuh-indexer/certs/wazuh.indexer-key.pem
     healthcheck:
-      test: ["CMD-SHELL", "curl -s -k https://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      test: ["CMD-SHELL", "curl -s -k -u admin:${WAZUH_INDEXER_PASSWORD:-SecureOps_Ind3x!} https://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
       interval: 20s
       timeout: 10s
       retries: 10
@@ -107,10 +102,7 @@ services:
       DASHBOARD_PASSWORD: ${WAZUH_DASHBOARD_PASSWORD:-SecureOps_D4sh!}
       API_USERNAME: wazuh-wui
       API_PASSWORD: ${WAZUH_API_PASSWORD:-SecureOps_API!23}
-    volumes:
-      - ./config/certs/root-ca.pem:/usr/share/wazuh-dashboard/certs/root-ca.pem
-      - ./config/certs/wazuh.dashboard.pem:/usr/share/wazuh-dashboard/certs/wazuh.dashboard.pem
-      - ./config/certs/wazuh.dashboard-key.pem:/usr/share/wazuh-dashboard/certs/wazuh.dashboard-key.pem
+    # No cert mounts — uses demo certs built into the image
     networks:
       - wazuh-net
     depends_on:

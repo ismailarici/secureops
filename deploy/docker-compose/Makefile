@@ -1,11 +1,11 @@
-.PHONY: wazuh-certs wazuh-up wazuh-down wazuh-logs \
+.PHONY: wazuh-up wazuh-init wazuh-down wazuh-logs \
         defectdojo-up defectdojo-down defectdojo-logs defectdojo-token \
         help
 
 help:
 	@echo "Wazuh:"
-	@echo "  make wazuh-certs       Generate SSL certificates (first time only)"
 	@echo "  make wazuh-up          Start the Wazuh stack"
+	@echo "  make wazuh-init        Initialise OpenSearch security (run once after first start)"
 	@echo "  make wazuh-down        Stop and remove Wazuh containers"
 	@echo "  make wazuh-logs        Tail Wazuh manager logs"
 	@echo ""
@@ -17,48 +17,29 @@ help:
 
 # ─── Wazuh ───────────────────────────────────────────────────────────────────
 
-wazuh-certs:
-	@echo "Generating Wazuh SSL certificates..."
-	@mkdir -p config/certs
-	docker run --rm \
-	  -v $$(pwd)/config/certs:/certs \
-	  wazuh/wazuh-certs-generator:0.0.1 \
-	  --certs-tool /certs \
-	  --config /certs/config.yml 2>/dev/null || \
-	  ( \
-	    echo "Falling back to openssl self-signed cert generation..."; \
-	    openssl req -x509 -nodes -days 3650 -newkey rsa:4096 \
-	      -keyout config/certs/root-ca.key \
-	      -out config/certs/root-ca.pem \
-	      -subj "/C=US/ST=State/L=City/O=SecureOps/CN=wazuh-root-ca"; \
-	    for node in wazuh.manager wazuh.indexer wazuh.dashboard; do \
-	      openssl req -new -nodes -newkey rsa:2048 \
-	        -keyout config/certs/$$node-key.pem \
-	        -out config/certs/$$node.csr \
-	        -subj "/C=US/ST=State/L=City/O=SecureOps/CN=$$node"; \
-	      openssl x509 -req -days 3650 \
-	        -in config/certs/$$node.csr \
-	        -CA config/certs/root-ca.pem \
-	        -CAkey config/certs/root-ca.key \
-	        -CAcreateserial \
-	        -out config/certs/$$node.pem; \
-	    done; \
-	    cp config/certs/root-ca.pem config/certs/root-ca-manager.pem; \
-	    echo "Certificates generated in config/certs/"; \
-	  )
-
 wazuh-up:
 	@[ -f .env ] || ( echo "Copy .env.example to .env and configure it first."; exit 1 )
-	@[ -f config/certs/root-ca.pem ] || ( echo "Run 'make wazuh-certs' first."; exit 1 )
 	docker compose -f wazuh.yml --env-file .env up -d
 	@echo ""
-	@echo "Wazuh starting. Dashboard will be available at https://localhost"
-	@echo "API available at https://localhost:55000"
-	@echo "SecureOps config:"
-	@echo "  url: https://localhost"
-	@echo "  port: 55000"
-	@echo "  username: wazuh-wui"
-	@echo "  password: (see .env WAZUH_API_PASSWORD)"
+	@echo "Wazuh starting (uses built-in demo TLS certificates)."
+	@echo "Once the indexer is healthy, run: make wazuh-init"
+	@echo ""
+	@echo "Dashboard: https://localhost"
+	@echo "API:       https://localhost:55000  (wazuh-wui / see .env WAZUH_API_PASSWORD)"
+
+wazuh-init:
+	@echo "Initialising OpenSearch security index..."
+	@docker exec docker-compose-wazuh.indexer-1 bash -c "\
+	  export JAVA_HOME=/usr/share/wazuh-indexer/jdk && \
+	  export PATH=\$$JAVA_HOME/bin:\$$PATH && \
+	  bash /usr/share/wazuh-indexer/plugins/opensearch-security/tools/securityadmin.sh \
+	    -cd /usr/share/wazuh-indexer/opensearch-security \
+	    -nhnv \
+	    -cacert /usr/share/wazuh-indexer/certs/root-ca.pem \
+	    -cert /usr/share/wazuh-indexer/certs/admin.pem \
+	    -key /usr/share/wazuh-indexer/certs/admin-key.pem \
+	    -p 9200 -h 127.0.0.1"
+	@echo "Security index initialised. Wazuh should become healthy shortly."
 
 wazuh-down:
 	docker compose -f wazuh.yml down
