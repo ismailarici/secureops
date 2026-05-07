@@ -139,8 +139,8 @@ cd deploy/docker-compose
 cp .env.example .env
 # edit .env with secure passwords
 
-make wazuh-certs   # first time only
-make wazuh-up      # https://localhost (dashboard), port 55000 (API)
+make wazuh-up      # start Wazuh stack
+make wazuh-init    # first time only — initialises OpenSearch security and patches filebeat
 make defectdojo-up # http://localhost:8080
 make defectdojo-token
 ```

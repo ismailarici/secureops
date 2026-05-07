@@ -24,18 +24,20 @@ cp .env.example .env
 ### Wazuh
 
 ```bash
-# Generate SSL certificates (first time only)
-make wazuh-certs
-
 # Start the stack
 make wazuh-up
+
+# First time only — initialises OpenSearch security, starts manager, patches filebeat config
+make wazuh-init
 
 # Tail logs
 make wazuh-logs
 ```
 
+`wazuh-init` runs four steps automatically: waits for OpenSearch, runs `securityadmin`, starts the manager and dashboard, then patches the filebeat TLS config so the manager stays running. Run it once after every `make wazuh-down -v` (fresh volume) or after the first `make wazuh-up`.
+
 Wazuh is ready when the dashboard loads at **https://localhost**.
-Login: `admin` / value of `WAZUH_INDEXER_PASSWORD` in `.env`.
+Login: `admin` / `admin` (demo stack — change `WAZUH_API_PASSWORD` in `.env` for the API user).
 
 **Connect SecureOps to Wazuh** — update `config/config.yaml`:
 ```yaml
@@ -47,6 +49,7 @@ integrations:
     username: "wazuh-wui"
     password: "<WAZUH_API_PASSWORD from .env>"
     min_severity: "medium"
+    verify_ssl: false   # demo stack uses self-signed certs
 ```
 
 Deploy the custom SecureOps rules to the Wazuh manager:
